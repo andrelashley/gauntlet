@@ -1,6 +1,6 @@
-import type { Message } from "./types.js";
+import type { Message, Model } from "./types.js";
 
-export async function runAgent(prompt: string): Promise<string> {
+export async function runAgent(model: Model, prompt: string): Promise<string> {
     const messages: Message[] = [{ role: 'system', content: "You are a helpful assistant." }];
 
     const maxSteps = 4;
