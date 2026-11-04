@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test tests/**/*.ts"
+    "test": "tsx --test tests/**/*.ts",
+    "demo": "npx tsx src/demo.ts"
   },
   "keywords": [],
   "author": "",

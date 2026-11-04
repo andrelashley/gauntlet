@@ -1,9 +1,8 @@
 export type ToolCall = { id: string, name: string, arguments: unknown };
 
 export type Message = 
-    | { role: 'system'; content: string }
     | { role: 'user'; content: string }
-    | { role: 'assistant'; content: string }
+    | { role: 'assistant'; content: string, toolCalls?: ToolCall[] }
     | { role: 'tool'; callId: string; content: string; isError: boolean };
 
 

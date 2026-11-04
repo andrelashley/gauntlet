@@ -1,35 +1,74 @@
-import type { Message, Model } from "./types.js";
+import type { AgentResult, Message, Model, Tool } from "./types.js";
 
-export async function runAgent(model: Model, prompt: string): Promise<string> {
-    const messages: Message[] = [{ role: 'system', content: "You are a helpful assistant." }];
+export async function runAgent(options: {
+    model: Model, 
+    tools: readonly Tool[],
+    prompt: string;
+    maxSteps?: number;
+    signal?: AbortSignal;
+  }): Promise<AgentResult> {
+    const { model, tools, prompt, maxSteps = 10 } = options;
 
-    const maxSteps = 4;
+    if(!Number.isSafeInteger(maxSteps) || maxSteps < 1) {
+        throw new RangeError("maxSteps must be a positive safe integer");
+    }
 
-    messages.push({ role: 'user', content: prompt });
+    const signal = options.signal ?? new AbortController().signal;
+    const messages: Message[] = [{ role: 'user', content: prompt }];
+    const registry = new Map(tools.map(tool => [tool.name, tool])); // register tools
+    
+    if(registry.size !== tools.length) {
+        throw new Error("Duplicate tool names found in tools array");
+    }
 
-    // for (let step = 0; step < maxSteps; step++) {
+    const definitions = tools.map(({ name, description, parameters }) => ({
+        name,
+        description,
+        parameters
+    }));
 
-    // }
+    for(let step = 0; step < maxSteps; step++) {
+      if(signal.aborted) return { status: 'aborted', messages, steps: step };
 
-    setTimeout(() => {
-        console.log("Agent is thinking...");
-    }, 500);
+      let response;
+      try {
+        response = await model.generate({ messages: [...messages], tools: definitions, signal });
+      } catch (error) {
+        if(signal.aborted) return { status: 'aborted', messages, steps: step };
+        throw error;
+      }
 
-    const reply = generateRandomReply();
-    console.log(reply);
+      if(signal.aborted) return { status: 'aborted', messages, steps: step };
+      const calls = response.toolCalls ?? [];
+      messages.push({ role: 'assistant', content: response.content, ...(calls.length ? { toolCalls: calls } : {}) });
+      if (!calls.length) return { status: 'completed', answer: response.content, messages, steps: step + 1 };
 
-    return reply;
+      for (const call of calls) {
+        if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
+        const tool = registry.get(call.name);
+        if (!tool) {
+          messages.push({ role: 'tool', callId: call.id, content: `Unknown tool: ${call.name}`, isError: true });
+          continue;
+        }
+        try {
+          const result = await tool.execute(call.arguments, signal);
+          if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
+          messages.push({ role: 'tool', callId: call.id, content: serializeToolResult(result) ?? null, isError: false });
+        } catch (error) {
+          if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
+          messages.push({
+            role: 'tool', callId: call.id,
+            content: error instanceof Error ? error.message : String(error),
+            isError: true
+          });
+        }
+      }
+    }
+    return { status: 'step_limit', messages, steps: maxSteps };
 }
 
-function generateRandomReply(): string {
-  const replies = [
-    "Interesting. Tell me more.",
-    "I have considered your request.",
-    "Gauntlet is thinking...",
-    "That sounds suspiciously reasonable.",
-    "I reject your premise entirely.",
-    "Proceed. For now.",
-  ];
-
-  return replies[Math.floor(Math.random() * replies.length)]!;
+function serializeToolResult(result: unknown): string {
+  return typeof result === 'string'
+    ? result
+    : JSON.stringify(result);
 }
