@@ -1,4 +1,5 @@
 import type { AgentResult, Message, Model, Tool } from "./types.js";
+import { ToolRegistry } from "./registry.js";
 
 export async function runAgent(options: {
     model: Model, 
@@ -15,18 +16,9 @@ export async function runAgent(options: {
 
     const signal = options.signal ?? new AbortController().signal;
     const messages: Message[] = [{ role: 'user', content: prompt }];
-    const registry = new Map(tools.map(tool => [tool.name, tool])); // register tools
+    const registry = new ToolRegistry(tools); // register tools
+    const definitions = registry.definitions();
     
-    if(registry.size !== tools.length) {
-        throw new Error("Duplicate tool names found in tools array");
-    }
-
-    const definitions = tools.map(({ name, description, parameters }) => ({
-        name,
-        description,
-        parameters
-    }));
-
     for(let step = 0; step < maxSteps; step++) {
       if(signal.aborted) return { status: 'aborted', messages, steps: step };
 
@@ -47,9 +39,16 @@ export async function runAgent(options: {
         if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
         const tool = registry.get(call.name);
         if (!tool) {
-          messages.push({ role: 'tool', callId: call.id, content: `Unknown tool: ${call.name}`, isError: true });
+          messages.push({ 
+            role: 'tool',
+            callId: call.id,
+            content: `Unknown tool: ${call.name}`,
+            isError: true });
           continue;
         }
+
+        const validationErrors = []; // TODO: Implement validation logic for tool parameters based on tool.parameters
+
         try {
           const result = await tool.execute(call.arguments, signal);
           if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
