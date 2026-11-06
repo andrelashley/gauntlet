@@ -1,5 +1,5 @@
 import type { AgentResult, Message, Model, Tool } from "./types.js";
-import { ToolRegistry } from "./registry.js";
+import { ToolRegistry, validate } from "./registry.js";
 
 export async function runAgent(options: {
     model: Model, 
@@ -47,19 +47,31 @@ export async function runAgent(options: {
           continue;
         }
 
-        const validationErrors = []; // TODO: Implement validation logic for tool parameters based on tool.parameters
+        const validationErrors = validate(call.arguments, tool.parameters);
+        if(validationErrors.length) {
+          messages.push({ 
+            role: 'tool',
+            callId: call.id,
+            content: `Invalid arguments for tool ${call.name}: ${validationErrors.join('; ')}`,
+            isError: true });
+          continue;
+        }
 
         try {
           const result = await tool.execute(call.arguments, signal);
           if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
           messages.push({ role: 'tool', callId: call.id, content: serializeToolResult(result) ?? null, isError: false });
         } catch (error) {
-          if (signal.aborted) return { status: 'aborted', messages, steps: step + 1 };
+          if (signal.aborted) return { status: 'aborted', messages, steps: step };
           messages.push({
             role: 'tool', callId: call.id,
             content: error instanceof Error ? error.message : String(error),
             isError: true
           });
+          return {
+            status: 'model_error', messages, steps: step,
+            error: error instanceof Error ? error.message : String(error)
+          };
         }
       }
     }
